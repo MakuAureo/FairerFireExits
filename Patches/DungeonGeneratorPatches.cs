@@ -23,6 +23,16 @@ internal class DungeonGeneratorPatches
                     prop.DepthWeightScale = new AnimationCurve(DungeonGeneratorHelper.fireExitKeyframes);
                 }
             }
+
+            SpawnSyncedObject exitSpawn = tile.GetComponentInChildren<SpawnSyncedObject>();
+            if (exitSpawn == null)
+                continue;
+
+            if (exitSpawn.spawnPrefab.name == "EntranceTeleportA")
+            {
+                DungeonGeneratorHelper.mainDoorDepth = tile.Placement.NormalizedPathDepth;
+                FairerFireExits.Logger.LogInfo($"Found Main exit at {DungeonGeneratorHelper.mainDoorDepth} of the main path");
+            }
         }
     }
 
@@ -62,6 +72,7 @@ internal class DungeonGeneratorPatches
 internal static class DungeonGeneratorHelper
 {
     public const int fireExitGroupID = 1231;
+    public static float mainDoorDepth = 0f;
 
     public readonly static Keyframe[] fireExitKeyframes =
     {
@@ -72,8 +83,15 @@ internal static class DungeonGeneratorHelper
             new Keyframe(1f, 1f, 0.02613646f, 0.02613646f)
     };
 
+    public static float GetAdjustedDistanceFromMain(float NormalizedPathDepth)
+    {
+        mainDoorDepth = 0f;
+        float greatestDistanceFromMain = Mathf.Max(mainDoorDepth, 1f - mainDoorDepth);
+        return Mathf.Abs(NormalizedPathDepth - mainDoorDepth)/greatestDistanceFromMain;
+    }
+
     public static float GetNormalizedPathDepthForFireExit(Tile currTile, GlobalProp currProp)
     {
-        return (currProp.PropGroupID == fireExitGroupID) ? (currTile.Placement.NormalizedPathDepth) : (currTile.Placement.NormalizedDepth);
+        return (currProp.PropGroupID == fireExitGroupID) ? (GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth)) : (currTile.Placement.NormalizedDepth);
     }
 }
