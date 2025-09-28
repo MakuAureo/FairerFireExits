@@ -3,16 +3,38 @@ using HarmonyLib;
 using DunGen;
 using System.Collections.Generic;
 using System.Reflection.Emit;
+using BepInEx.Configuration;
 
 namespace FairerFireExits.Patches;
 
 [HarmonyPatch(typeof(DungeonGenerator))]
 internal class DungeonGeneratorPatches
 {
+    [HarmonyPatch(nameof(DungeonGenerator.Generate))]
+    [HarmonyPrefix]
+    private static void PreGenerate(DungeonGenerator __instance)
+    {
+        if (!(Networking.FFENetworkManager.Instance.IsServer || Networking.FFENetworkManager.Instance.IsHost))
+            return;
+
+        if (FairerFireExits.FireConfig.ApplyFireExitChangePerInterior.TryGetValue(__instance.DungeonFlow, out ConfigEntry<bool> config) && !config.Value)
+        {
+            FairerFireExits.Logger.LogInfo($"Found current DungeonFlow ({__instance.DungeonFlow.name}) config but patch is set to false");
+            Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = false;
+
+            return;
+        }
+
+        Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = true;
+    }
+
     [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
     [HarmonyPrefix]
     private static void PreProcessGlobalProps(DungeonGenerator __instance)
     {
+        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value)
+            return;
+
         foreach (Tile tile in __instance.CurrentDungeon.AllTiles)
         {
             GlobalProp[] allProps = tile.GetComponentsInChildren<GlobalProp>();
@@ -62,6 +84,7 @@ internal class DungeonGeneratorPatches
         matcher.RemoveInstructionsInRange(startIndex, endIndex);
         matcher.InsertAndAdvance(
                 new CodeInstruction(OpCodes.Ldloc_S, 6),
+                new CodeInstruction(OpCodes.Ldarg_0),
                 new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(DungeonGeneratorHelper), nameof(DungeonGeneratorHelper.GetNormalizedPathDepthForFireExit)))
         );
 
@@ -90,8 +113,11 @@ internal static class DungeonGeneratorHelper
         return Mathf.Abs(NormalizedPathDepth - mainDoorDepth)/greatestDistanceFromMain;
     }
 
-    public static float GetNormalizedPathDepthForFireExit(Tile currTile, GlobalProp currProp)
+    public static float GetNormalizedPathDepthForFireExit(Tile currTile, GlobalProp currProp, DungeonGenerator instance)
     {
-        return (currProp.PropGroupID == fireExitGroupID) ? (GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth)) : (currTile.Placement.NormalizedDepth);
+        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value)
+            return currTile.Placement.NormalizedDepth;
+        else
+            return (currProp.PropGroupID == fireExitGroupID) ? (GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth)) : (currTile.Placement.NormalizedDepth);
     }
 }
