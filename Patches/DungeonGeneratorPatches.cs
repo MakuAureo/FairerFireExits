@@ -28,7 +28,7 @@ internal class DungeonGeneratorPatches
         Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = true;
     }
 
-    [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
+    [HarmonyPatch(typeof(DungeonGenerator), "ProcessGlobalProps")]
     [HarmonyPrefix]
     private static void PreProcessGlobalProps(DungeonGenerator __instance)
     {
@@ -58,7 +58,7 @@ internal class DungeonGeneratorPatches
         }
     }
 
-    [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
+    [HarmonyPatch(typeof(DungeonGenerator), "ProcessGlobalProps")]
     [HarmonyTranspiler]
     private static IEnumerable<CodeInstruction> TranspileProcessGlobalProps(IEnumerable<CodeInstruction> codes)
     {

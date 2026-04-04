@@ -7,7 +7,7 @@ namespace FairerFireExits.Patches;
 [HarmonyPatch(typeof(GameNetworkManager))]
 internal class GameNetworkManagerPatches
 {
-    [HarmonyPatch(nameof(GameNetworkManager.Start))]
+    [HarmonyPatch(typeof(GameNetworkManager), "Start")]
     [HarmonyPostfix]
     private static void PostStart(GameNetworkManager __instance)
     {
