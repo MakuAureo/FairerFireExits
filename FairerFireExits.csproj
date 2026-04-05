@@ -2,7 +2,7 @@
     <PropertyGroup>
         <AssemblyName>OreoM.FairerFireExits</AssemblyName>
         <Product>FairerFireExits</Product>
-        <Version>1.2.0</Version>
+        <Version>1.2.1</Version>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -41,7 +41,7 @@
     </ItemGroup>
 
     <Target Name="NetcodePatch" AfterTargets="PostBuildEvent">
-        <Exec Command="netcode-patch &quot;$(TargetPath)&quot; @(ReferencePathWithRefAssemblies->'&quot;%(Identity)&quot;', ' ')"/>
+        <Exec Command="netcode-patch -nv 1.12.0 &quot;$(TargetPath)&quot; @(ReferencePathWithRefAssemblies->'&quot;%(Identity)&quot;', ' ')"/>
     </Target>
 
     <ItemGroup>

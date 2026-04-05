@@ -11,4 +11,5 @@ This mod changes Dungeon Generation and thus is required by everyone in the lobb
 # Credits
 
 Thanks to [AdiBTW](https://thunderstore.io/c/lethal-company/p/AdiBTW/) for helping me find and understand the Fire Exit spawning code.
+
 Thanks to [mattymatty](https://thunderstore.io/c/lethal-company/p/mattymatty/) for the empty prefab code used prior to the implementation of Network code.

@@ -100,8 +100,8 @@ internal static class DungeonGeneratorHelper
     public readonly static Keyframe[] fireExitKeyframes =
     {
             new Keyframe(0f, 0f, 0f, 0f),
-            new Keyframe(0.2f, 0f, 0.000007952512f, 0.04168295f),
-            new Keyframe(0.5f, 0.3f, 0.000007952512f, 0.04168295f),
+            new Keyframe(0.2f, 0f, 0f, 0.04168295f),
+            new Keyframe(0.5f, 0.3f, 0f, 0.04168295f),
             new Keyframe(0.8f, 1f, 0.02613646f, 0.02613646f),
             new Keyframe(1f, 1f, 0.02613646f, 0.02613646f)
     };
@@ -115,9 +115,9 @@ internal static class DungeonGeneratorHelper
 
     public static float GetNormalizedPathDepthForFireExit(Tile currTile, GlobalProp currProp, DungeonGenerator instance)
     {
-        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value)
+        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value || currProp.PropGroupID != fireExitGroupID)
             return currTile.Placement.NormalizedDepth;
         else
-            return (currProp.PropGroupID == fireExitGroupID) ? (GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth)) : (currTile.Placement.NormalizedDepth);
+            return GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth);
     }
 }
