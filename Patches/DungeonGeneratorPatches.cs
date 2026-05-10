@@ -1,123 +1,126 @@
-using UnityEngine;
 using HarmonyLib;
 using DunGen;
 using System.Collections.Generic;
-using System.Reflection.Emit;
 using BepInEx.Configuration;
+using UnityEngine;
+using System.Reflection.Emit;
 
 namespace FairerFireExits.Patches;
 
 [HarmonyPatch(typeof(DungeonGenerator))]
 internal class DungeonGeneratorPatches
 {
-    [HarmonyPatch(nameof(DungeonGenerator.Generate))]
-    [HarmonyPrefix]
-    private static void PreGenerate(DungeonGenerator __instance)
+  [HarmonyPatch(nameof(DungeonGenerator.Generate))]
+  [HarmonyPrefix]
+  private static void PreGenerate(DungeonGenerator __instance)
+  {
+    if (!(Networking.FFENetworkManager.Instance.IsServer || Networking.FFENetworkManager.Instance.IsHost))
+      return;
+
+    if (FairerFireExits.FireConfig.ApplyFireExitChangePerInterior.TryGetValue(__instance.DungeonFlow, out ConfigEntry<bool> config) && !config.Value)
     {
-        if (!(Networking.FFENetworkManager.Instance.IsServer || Networking.FFENetworkManager.Instance.IsHost))
-            return;
+      FairerFireExits.Logger.LogInfo($"Found current DungeonFlow ({__instance.DungeonFlow.name}) config but patch is set to false");
+      Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = false;
 
-        if (FairerFireExits.FireConfig.ApplyFireExitChangePerInterior.TryGetValue(__instance.DungeonFlow, out ConfigEntry<bool> config) && !config.Value)
-        {
-            FairerFireExits.Logger.LogInfo($"Found current DungeonFlow ({__instance.DungeonFlow.name}) config but patch is set to false");
-            Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = false;
-
-            return;
-        }
-
-        Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = true;
+      return;
     }
 
-    [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
-    [HarmonyPrefix]
-    private static void PreProcessGlobalProps(DungeonGenerator __instance)
+    Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value = true;
+  }
+
+  [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
+  [HarmonyPrefix]
+  private static void PreProcessGlobalProps(DungeonGenerator __instance)
+  {
+    if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value)
+      return;
+
+    DungeonGeneratorHelper.allFireProps.Clear();
+    DungeonGeneratorHelper.allExitPlacements.Clear();
+
+    foreach (Tile tile in __instance.CurrentDungeon.AllTiles)
     {
-        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value)
-            return;
-
-        foreach (Tile tile in __instance.CurrentDungeon.AllTiles)
+      GlobalProp[] allProps = tile.GetComponentsInChildren<GlobalProp>();
+      foreach (GlobalProp prop in allProps)
+      {
+        if (prop.PropGroupID == DungeonGeneratorHelper.fireExitGroupID)
         {
-            GlobalProp[] allProps = tile.GetComponentsInChildren<GlobalProp>();
-            foreach (GlobalProp prop in allProps)
-            {
-                if (prop.PropGroupID == DungeonGeneratorHelper.fireExitGroupID)
-                {
-                    prop.DepthWeightScale = new AnimationCurve(DungeonGeneratorHelper.fireExitKeyframes);
-                }
-            }
-
-            SpawnSyncedObject exitSpawn = tile.GetComponentInChildren<SpawnSyncedObject>();
-            if (exitSpawn == null)
-                continue;
-
-            if (exitSpawn.spawnPrefab.name == "EntranceTeleportA")
-            {
-                DungeonGeneratorHelper.mainDoorDepth = tile.Placement.NormalizedPathDepth;
-                FairerFireExits.Logger.LogInfo($"Found Main exit at {DungeonGeneratorHelper.mainDoorDepth} of the main path");
-            }
+          DungeonGeneratorHelper.allFireProps.Add(prop);
         }
-    }
+      }
 
-    [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
-    [HarmonyTranspiler]
-    private static IEnumerable<CodeInstruction> TranspileProcessGlobalProps(IEnumerable<CodeInstruction> codes)
+      SpawnSyncedObject exitSpawn = tile.GetComponentInChildren<SpawnSyncedObject>();
+      if (exitSpawn == null)
+        continue;
+
+      if (exitSpawn.spawnPrefab.name == "EntranceTeleportA")
+      {
+        DungeonGeneratorHelper.allExitPlacements.Add(tile.Placement.NormalizedPathDepth);
+      }
+    }
+  }
+
+  [HarmonyPatch(nameof(DungeonGenerator.ProcessGlobalProps))]
+  [HarmonyTranspiler]
+  private static IEnumerable<CodeInstruction> TranspileProcessGlobalProps(IEnumerable<CodeInstruction> codes, ILGenerator ilgen)
+  {
+    CodeMatcher matcher = new(codes, ilgen);
+
+    Label loopContinue = ilgen.DefineLabel();
+    matcher.End().MatchBack(false, new CodeMatch(OpCodes.Ldloc_1)).Advance(-7).Instruction.labels.Add(loopContinue);
+
+    Label targetIfNotFire = ilgen.DefineLabel();
+    CodeInstruction[] fireExitLogic =
     {
-        CodeMatcher matcher = new(codes);
+      new CodeInstruction(OpCodes.Ldloc_S, 13),
+      new CodeInstruction(OpCodes.Ldfld, AccessTools.Field(typeof(DunGen.Graph.DungeonFlow.GlobalPropSettings), nameof(DunGen.Graph.DungeonFlow.GlobalPropSettings.ID))),
+      new CodeInstruction(OpCodes.Ldc_I4, DungeonGeneratorHelper.fireExitGroupID),
+      new CodeInstruction(OpCodes.Bne_Un, targetIfNotFire),
+      new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(DungeonGeneratorHelper), nameof(DungeonGeneratorHelper.PlaceFireOptimally))),
+      new CodeInstruction(OpCodes.Br, loopContinue)
+    };
 
-        matcher.MatchForward(true, new CodeMatch(OpCodes.Callvirt, AccessTools.PropertyGetter(typeof(TilePlacementData), nameof(TilePlacementData.NormalizedDepth))));
-        if (matcher.IsInvalid)
-        {
-            FairerFireExits.Logger.LogError($"Could not the ending pattern. Aborting {nameof(DungeonGeneratorPatches.TranspileProcessGlobalProps)} transpiler.");
-            return codes;
-        }
-        int endIndex = matcher.Pos;
+    matcher.MatchBack(false, new CodeMatch(OpCodes.Br));
+    CodeInstruction loopStart = matcher.Advance(1).Instruction;
+    fireExitLogic[0].labels.AddRange(loopStart.labels);
+    loopStart.labels.Clear();
+    loopStart.labels.Add(targetIfNotFire);
 
-        matcher.MatchBack(false, new CodeMatch(OpCodes.Ldloc_3));
-        if (matcher.IsInvalid)
-        {
-            FairerFireExits.Logger.LogError($"Could not the starting pattern. Aborting {nameof(DungeonGeneratorPatches.TranspileProcessGlobalProps)} transpiler.");
-            return codes;
-        }
-        matcher.Advance(1);
-        int startIndex = matcher.Pos;
-
-        matcher.RemoveInstructionsInRange(startIndex, endIndex);
-        matcher.InsertAndAdvance(
-                new CodeInstruction(OpCodes.Ldloc_S, 6),
-                new CodeInstruction(OpCodes.Ldarg_0),
-                new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(DungeonGeneratorHelper), nameof(DungeonGeneratorHelper.GetNormalizedPathDepthForFireExit)))
-        );
-
-        return matcher.InstructionEnumeration();
-    }
+    return matcher.Insert(fireExitLogic).InstructionEnumeration();
+  }
 }
 
 internal static class DungeonGeneratorHelper
 {
-    public const int fireExitGroupID = 1231;
-    public static float mainDoorDepth = 0f;
+  public const int fireExitGroupID = 1231;
+  public static List<float> allExitPlacements = new();
+  public static List<GlobalProp> allFireProps = new();
 
-    public readonly static Keyframe[] fireExitKeyframes =
+  public static void PlaceFireOptimally()
+  {
+    float bestDistance = 0f;
+    float bestPlacement = 1f;
+    int bestPlacementIdx = -1;
+    for (int i = 0; i < allFireProps.Count; i++)
     {
-            new Keyframe(0f, 0f, 0f, 0f),
-            new Keyframe(0.2f, 0f, 0f, 0.04168295f),
-            new Keyframe(0.5f, 0.3f, 0f, 0.04168295f),
-            new Keyframe(0.8f, 1f, 0.02613646f, 0.02613646f),
-            new Keyframe(1f, 1f, 0.02613646f, 0.02613646f)
-    };
-
-    public static float GetAdjustedDistanceFromMain(float NormalizedPathDepth)
-    {
-        mainDoorDepth = 0f;
-        float greatestDistanceFromMain = Mathf.Max(mainDoorDepth, 1f - mainDoorDepth);
-        return Mathf.Abs(NormalizedPathDepth - mainDoorDepth)/greatestDistanceFromMain;
+      float minDist = 100f;
+      float currPlacement = allFireProps[i].gameObject.GetComponentInParent<Tile>(includeInactive: false).Placement.NormalizedPathDepth;
+      foreach (float placement in allExitPlacements)
+        minDist = Mathf.Min(minDist, Mathf.Abs(currPlacement - placement));
+      
+      if (minDist > bestDistance)
+      {
+        bestDistance = minDist;
+        bestPlacement = currPlacement;
+        bestPlacementIdx = i;
+      }
     }
 
-    public static float GetNormalizedPathDepthForFireExit(Tile currTile, GlobalProp currProp, DungeonGenerator instance)
+    if (bestPlacementIdx != -1)
     {
-        if (!Networking.FFENetworkManager.Instance.shouldUseFireExitPatch.Value || currProp.PropGroupID != fireExitGroupID)
-            return currTile.Placement.NormalizedDepth;
-        else
-            return GetAdjustedDistanceFromMain(currTile.Placement.NormalizedPathDepth);
+      FairerFireExits.Logger.LogInfo($"Found best fire exit placement: {bestPlacement}");
+      allExitPlacements.Add(bestPlacement);
+      allFireProps[bestPlacementIdx].gameObject.SetActive(true);
     }
+  }
 }
